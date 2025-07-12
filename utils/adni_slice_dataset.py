@@ -43,3 +43,37 @@ class ADNISliceDataset(Dataset):
         image = torch.tensor(self.data[idx], dtype=torch.float32)
         label = torch.tensor(self.labels[idx], dtype=torch.long)
         return {'image': image, 'label': label}
+
+
+# === Dataset with demographic conditioning ===
+class ADNISliceDemographicDataset(Dataset):
+    def __init__(self, npy_path, labels_path, demographic_path):
+        a = np.load(npy_path, mmap_mode='r')  # [N, W, D, H, C]
+        labels = np.load(labels_path)
+        demographics = np.load(demographic_path).astype(np.float32)  # [N, 5]
+
+        a = np.squeeze(a, axis=-1)
+        a = np.transpose(a, (0, 2, 3, 1))  # -> [N, D, H, W]
+
+        self.data = np.expand_dims(a[:, 57, :, :], axis=1)  # -> [N, 1, H, W]
+        self.percentile = np.percentile(self.data, 99.5).astype(np.float32)
+        self.data = np.clip(self.data / self.percentile, 0.0, 1.0)
+
+        self.labels = np.where((labels == 1) | (labels == 2), 1, labels)
+        self.labels = np.where(self.labels == 3, 2, self.labels)
+
+        # Normalize Age, MMSE, ADAS-Cog
+        demo = demographics.copy()
+        demo[:, 0] = (demo[:, 0] - 60.0) / (90.0 - 60.0)         # Age
+        demo[:, 3] = (demo[:, 3] - 0.0) / (30.0 - 0.0)           # MMSE
+        demo[:, 4] = (demo[:, 4] - 0.0) / (70.0 - 0.0)           # ADAS-Cog
+        self.demographics = torch.tensor(demo, dtype=torch.float32)
+
+    def __len__(self):
+        return self.data.shape[0]
+
+    def __getitem__(self, idx):
+        image = torch.tensor(self.data[idx], dtype=torch.float32)
+        label = torch.tensor(self.labels[idx], dtype=torch.long)
+        demo = self.demographics[idx]  # shape: [5]
+        return {'image': image, 'label': label, 'demo': demo}
